@@ -61,3 +61,60 @@ def build_ip_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
+
+def score_anomalies(
+    feature_df: pd.DataFrame,
+    contamination: float = 0.15,
+    random_state: int = 42
+) -> pd.DataFrame:
+    # Add anomaly scores to ip feature data
+
+    result = feature_df.copy()
+
+    # Not enough data to train the model
+    if len(result) < 3:
+        result["anomaly_score"] = 0.0
+        result["is_anomaly"] = False
+        return result
+
+    # Get the features used by the model
+    X = result[FEATURE_COLUMNS].fillna(0).to_numpy()
+
+    # Create and train the Isolation Forest model
+    model = IsolationForest(
+        contamination=contamination,
+        random_state=random_state
+    )
+
+    model.fit(X)
+
+    # Convert the model scores so higher means more suspicious
+    raw_scores = -model.score_samples(X)
+
+    # Convert the scores to a 0 to 100 range
+    lo, hi = raw_scores.min(), raw_scores.max()
+
+    if hi > lo:
+        normalised = (raw_scores - lo) / (hi - lo) * 100
+    else:
+        normalised = np.zeros_like(raw_scores)
+
+    result["anomaly_score"] = normalised.round(1)
+
+    # Isolation Forest uses -1 for anomalies
+    result["is_anomaly"] = model.predict(X) == -1
+
+    return result
+
+
+def run_anomaly_detection(
+    df: pd.DataFrame,
+    contamination: float = 0.15
+) -> pd.DataFrame:
+    # Build the features and run the anomaly model
+    features = build_ip_features(df)
+
+    return score_anomalies(
+        features,
+        contamination=contamination
+    )

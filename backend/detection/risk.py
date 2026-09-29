@@ -42,14 +42,18 @@ def severity_for_score(score: float) -> str:
     # Turn the risk score into a severity level
     if score >= 75:
         return "critical"
-    elif score >= 50:
+
+    if score >= 50:
         return "high"
-    else:
+
+    if score >= 25:
         return "low"
 
     return "informational"
 
+
 def build_incidents(signals: list[dict], anomaly_df: pd.DataFrame) -> list[dict]:
+    """Group detection signals into incidents."""
 
     # Group all signals by IP address
     by_ip = defaultdict(list)

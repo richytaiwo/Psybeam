@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+<title>Psybeam // Security Monitor</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.32.0/plotly.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+
+
+</head>
+
+<body>
+
+
+<!-- Header -->
+<header class="topbar">
+    <div class="brand">
+        <div class="brand-mark">Ψ</div>
+
+        <div class="brand-text">
+            <h1>PSYBEAM</h1>
+            <p>Automated Security Incident &amp; Log Analyzer</p>
+        </div>
+    </div>
+
+    <div class="actions">
+        <label class="btn" for="fileInput">Upload log</label>
+        <input id="fileInput" type="file" accept=".log,.txt">
+
+        <button class="btn primary" id="runSampleBtn">
+            Analyze sample log
+        </button>
+    </div>
+</header>
+
+
+<!-- Main system statistics -->
+<section class="status-grid">
+
+    <div class="card">
+        <div class="stat-label">SYSTEM STATUS</div>
+        <div id="systemStatusPill" class="pill ok">
+            <span class="dot"></span>
+            NO DATA
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="stat-label">THREAT LEVEL</div>
+        <div id="threatLevel" class="stat-value threat-LOW">
+            —
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="stat-label">EVENTS ANALYSED</div>
+        <div id="eventsAnalysed" class="stat-value">
+            0
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="stat-label">SUSPICIOUS EVENTS</div>
+        <div id="suspiciousEvents" class="stat-value stat-warning">
+            0
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="stat-label">CRITICAL ALERTS</div>
+        <div id="criticalAlerts" class="stat-value stat-danger">
+            0
+        </div>
+    </div>
+
+</section>
+
+
+<!-- Latest incident and severity chart -->
+<section class="layout">
+
+    <div class="card incident-card">
+        <div class="panel-title">
+            LATEST INCIDENT
+        </div>
+
+        <div id="incidentBody">
+            <div class="empty-state">
+                Run an analysis to see incidents here.
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="panel-title">
+            SEVERITY DISTRIBUTION
+        </div>
+
+        <div id="severityChart" class="chart-box"></div>
+    </div>
+
+</section>
+
+
+<!-- Login activity charts -->
+<section class="layout">
+
+    <div class="card">
+        <div class="panel-title">
+            ATTACK FREQUENCY OVER TIME
+        </div>
+
+        <div id="timelineChart" class="chart-box"></div>
+    </div>
+
+    <div class="card">
+        <div class="panel-title">
+            FAILED VS SUCCESSFUL LOGINS
+        </div>
+
+        <div id="failSuccessChart" class="chart-box"></div>
+    </div>
+
+</section>
+
+
+<!-- IP and account charts -->
+<section class="layout">
+
+    <div class="card">
+        <div class="panel-title">
+            TOP ATTACKING IPs
+        </div>
+
+        <div id="topIpsChart" class="chart-box small"></div>
+    </div>
+
+    <div class="card">
+        <div class="panel-title">
+            AFFECTED ACCOUNTS
+        </div>
+
+        <div id="affectedAccountsChart" class="chart-box small"></div>
+    </div>
+
+</section>
+
+
+<!-- Full incident list -->
+<section class="card">
+
+    <div class="panel-title">
+        INCIDENT LOG
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>SEVERITY</th>
+                    <th>SOURCE IP</th>
+                    <th>COUNTRY</th>
+                    <th>RULE</th>
+                    <th>TARGET</th>
+                    <th>ATTEMPTS</th>
+                    <th>RISK</th>
+                    <th>WINDOW</th>
+                </tr>
+            </thead>
+
+            <tbody id="incidentTableBody">
+                <tr>
+                    <td colspan="8" class="empty-state">
+                        No incidents yet.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+</section>
+
+
+<footer class="footer-note">
+    PSYBEAM v1.0 · local analysis only · backend: http://localhost:8000
+</footer>
+
+
+<script>
+    const API = "http://localhost:8000";
+
+    const PLOTLY_FONT = {
+        family: "IBM Plex Mono, monospace",
+        color: "#7c8a96",
+        size: 11
+    };
+
+    const PLOTLY_LAYOUT_BASE = {
+        paper_bgcolor: "transparent",
+        plot_bgcolor: "transparent",
+        font: PLOTLY_FONT,
+        margin: {
+            l: 36,
+            r: 16,
+            t: 8,
+            b: 32
+        },
+        xaxis: {
+            gridcolor: "#1f2830",
+            zeroline: false
+        },
+        yaxis: {
+            gridcolor: "#1f2830",
+            zeroline: false
+        }
+    };
+
+    const CONFIG = {
+        displayModeBar: false,
+        responsive: true
+    };
+
+
+    // Send a request to the backend API
+    async function api(path) {
+        const response = await fetch(API + path);
+
+        if (!response.ok) {
+            throw new Error(
+                path + " failed: " + response.status
+            );
+        }
+
+        return response.json();
+    }
+
+
+    // Update the system status cards
+    function setStatus(status, threatLevel) {
+        const pill = document.getElementById("systemStatusPill");
+
+        let statusClass = "ok";
+
+        if (status !== "PROTECTED" && status !== "NO DATA") {
+            statusClass = "bad";
+        }
+
+        pill.className = "pill " + statusClass;
+
+        pill.innerHTML = `
+            <span class="dot"></span>
+            ${status}
+        `;
+
+        const threat = document.getElementById("threatLevel");
+
+        threat.textContent = threatLevel;
+        threat.className =
+            "stat-value threat-" + threatLevel;
+    }
+
+
+    // Turn seconds into a readable duration
+    function formatDuration(seconds) {
+        if (seconds == null) {
+            return "—";
+        }
+
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.round(seconds % 60);
+
+        return `${minutes}m ${remainingSeconds}s`;
+    }
+
+
+    // Show the highest risk incident
+    function renderIncident(incident) {
+        const body = document.getElementById("incidentBody");
+
+        if (!incident) {
+            body.innerHTML = `
+                <div class="empty-state">
+                    No suspicious activity detected. All clear.
+                </div>
+            `;
+
+            return;
+        }
+
+        const ruleLabel = incident.primary_rule
+            .replace(/_/g, " ")
+            .toUpperCase();
+
+        body.innerHTML = `
+            <div class="incident-head">
+                <span class="incident-flag">⚠</span>
+                <span class="incident-title">
+                    ${ruleLabel} DETECTED
+                </span>
+            </div>
+
+            <div class="incident-grid">
+
+                <div>
+                    <div class="kv-label">TARGET</div>
+                    <div class="kv-value">
+                        ${(incident.targeted_users || []).join(", ") || "—"}
+                    </div>
+                </div>
+
+                <div>
+                    <div class="kv-label">SOURCE</div>
+                    <div class="kv-value">
+                        ${incident.ip}
+                        <span class="mono-dim">
+                            (${incident.country})
+                        </span>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="kv-label">ATTEMPTS</div>
+                    <div class="kv-value">
+                        ${incident.attempts}
+                    </div>
+                </div>
+
+                <div>
+                    <div class="kv-label">DURATION</div>
+                    <div class="kv-value">
+                        ${formatDuration(incident.duration_seconds)}
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="kv-label">RISK SCORE</div>
+
+            <div class="risk-score">
+                ${incident.risk_score.toFixed(0)}
+                <span class="risk-max">/100</span>
+            </div>
+
+            <div class="risk-track">
+                <div
+                    class="risk-fill"
+                    style="width:${incident.risk_score}%"
+                ></div>
+            </div>
+
+            <div class="kv-label action-label">
+                RECOMMENDED ACTION
+            </div>
+
+            <ul class="actions-list">
+                ${(incident.recommended_actions || [])
+                    .map(action => `<li>${action}</li>`)
+                    .join("")}
+            </ul>
+        `;
+    }
+
+
+    // Fill the incident table
+    function renderIncidentTable(incidents) {
+        const tableBody =
+            document.getElementById("incidentTableBody");
+
+        if (!incidents.length) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="empty-state">
+                        No incidents yet.
+                    </td>
+                </tr>
+            `;
+
+            return;
+        }
+
+        tableBody.innerHTML = incidents
+            .map(incident => `
+                <tr>
+                    <td>
+                        <span class="sev-tag sev-${incident.severity}">
+                            ${incident.severity.toUpperCase()}
+                        </span>
+                    </td>
+
+                    <td>${incident.ip}</td>
+
+                    <td class="mono-dim">
+                        ${incident.country}
+                    </td>
+
+                    <td>
+                        ${incident.primary_rule.replace(/_/g, " ")}
+                    </td>
+
+                    <td>
+                        ${(incident.targeted_users || []).join(", ") || "—"}
+                    </td>
+
+                    <td>${incident.attempts}</td>
+
+                    <td>
+                        ${incident.risk_score.toFixed(0)}
+                    </td>
+
+                    <td class="mono-dim">
+                        ${
+                            incident.window_start
+                                ? incident.window_start.replace("T", " ")
+                                : "—"
+                        }
+                    </td>
+                </tr>
+            `)
+            .join("");
+    }
+
+
+    // Draw the severity breakdown
+    function renderSeverityChart(distribution) {
+        const order = [
+            "critical",
+            "high",
+            "low",
+            "informational"
+        ];
+
+        const colors = {
+            critical: "#ef4462",
+            high: "#f5a524",
+            low: "#4d9de0",
+            informational: "#4b5860"
+        };
+
+        const present = order.filter(severity =>
+            distribution.some(
+                item => item.severity === severity
+            )
+        );
+
+        const values = present.map(severity => {
+            const item = distribution.find(
+                entry => entry.severity === severity
+            );
+
+            return item ? item.count : 0;
+        });
+
+        Plotly.newPlot(
+            "severityChart",
+            [{
+                type: "pie",
+                labels: present.map(
+                    severity => severity.toUpperCase()
+                ),
+                values,
+                hole: 0.62,
+                marker: {
+                    colors: present.map(
+                        severity => colors[severity]
+                    ),
+                    line: {
+                        color: "#0a0e12",
+                        width: 2
+                    }
+                },
+                textfont: {
+                    color: "#dbe4ea",
+                    family: "IBM Plex Mono, monospace",
+                    size: 11
+                },
+                hoverinfo: "label+value"
+            }],
+            {
+                ...PLOTLY_LAYOUT_BASE,
+                showlegend: true,
+                legend: {
+                    orientation: "h",
+                    y: -0.1,
+                    font: PLOTLY_FONT
+                }
+            },
+            CONFIG
+        );
+    }
+
+
+    // Draw failed and accepted logins over time
+    function renderTimelineChart(timeline) {
+        const x = timeline.map(item => item.timestamp);
+
+        Plotly.newPlot(
+            "timelineChart",
+            [
+                {
+                    x,
+                    y: timeline.map(item => item.failed),
+                    type: "scatter",
+                    mode: "lines",
+                    name: "Failed",
+                    line: {
+                        color: "#ef4462",
+                        width: 2
+                    },
+                    fill: "tozeroy",
+                    fillcolor: "rgba(239,68,98,.08)"
+                },
+                {
+                    x,
+                    y: timeline.map(item => item.accepted),
+                    type: "scatter",
+                    mode: "lines",
+                    name: "Accepted",
+                    line: {
+                        color: "#2dd4bf",
+                        width: 2
+                    }
+                }
+            ],
+            {
+                ...PLOTLY_LAYOUT_BASE,
+                showlegend: true,
+                legend: {
+                    orientation: "h",
+                    y: 1.15,
+                    font: PLOTLY_FONT
+                }
+            },
+            CONFIG
+        );
+    }
+
+
+    // Draw the login outcome chart
+    function renderFailSuccessChart(data) {
+        Plotly.newPlot(
+            "failSuccessChart",
+            [{
+                type: "bar",
+                orientation: "h",
+                y: [
+                    "Accepted",
+                    "Invalid user",
+                    "Failed"
+                ],
+                x: [
+                    data.accepted,
+                    data.invalid_user,
+                    data.failed
+                ],
+                marker: {
+                    color: [
+                        "#2dd4bf",
+                        "#f5a524",
+                        "#ef4462"
+                    ]
+                }
+            }],
+            PLOTLY_LAYOUT_BASE,
+            CONFIG
+        );
+    }
+
+
+    // Show the IPs with the highest risk scores
+    function renderTopIpsChart(ips) {
+        const sorted = [...ips].reverse();
+
+        const colors = sorted.map(item => {
+            if (item.severity === "critical") {
+                return "#ef4462";
+            }
+
+            if (item.severity === "high") {
+                return "#f5a524";
+            }
+
+            if (item.severity === "low") {
+                return "#4d9de0";
+            }
+
+            return "#4b5860";
+        });
+
+        Plotly.newPlot(
+            "topIpsChart",
+            [{
+                type: "bar",
+                orientation: "h",
+                y: sorted.map(item => item.ip),
+                x: sorted.map(item => item.risk_score),
+                marker: {
+                    color: colors
+                },
+                text: sorted.map(
+                    item => item.risk_score.toFixed(0)
+                ),
+                textposition: "outside",
+                textfont: {
+                    color: "#7c8a96"
+                }
+            }],
+            {
+                ...PLOTLY_LAYOUT_BASE,
+                margin: {
+                    l: 110,
+                    r: 28,
+                    t: 8,
+                    b: 32
+                }
+            },
+            CONFIG
+        );
+    }
+
+
+    // Show the accounts targeted most often
+    function renderAffectedAccountsChart(accounts) {
+        const top = accounts
+            .slice(0, 8)
+            .reverse();
+
+        Plotly.newPlot(
+            "affectedAccountsChart",
+            [{
+                type: "bar",
+                orientation: "h",
+                y: top.map(account => account.user),
+                x: top.map(account => account.attempts),
+                marker: {
+                    color: "#4d9de0"
+                }
+            }],
+            {
+                ...PLOTLY_LAYOUT_BASE,
+                margin: {
+                    l: 90,
+                    r: 16,
+                    t: 8,
+                    b: 32
+                }
+            },
+            CONFIG
+        );
+    }
+
+
+    // Get the latest data and update the dashboard
+    async function refreshDashboard() {
+        const stats = await api("/api/stats");
+
+        setStatus(
+            stats.system_status,
+            stats.threat_level
+        );
+
+        document.getElementById("eventsAnalysed")
+            .textContent =
+            stats.events_analysed.toLocaleString();
+
+        document.getElementById("suspiciousEvents")
+            .textContent =
+            stats.suspicious_events.toLocaleString();
+
+        document.getElementById("criticalAlerts")
+            .textContent =
+            stats.critical_alerts.toLocaleString();
+
+        if (stats.run_id == null) {
+            return;
+        }
+
+        const [
+            incidents,
+            latest,
+            distribution,
+            timeline,
+            loginStats,
+            topIps,
+            accounts
+        ] = await Promise.all([
+            api("/api/incidents"),
+            api("/api/incidents/latest"),
+            api("/api/severity-distribution"),
+            api("/api/timeline"),
+            api("/api/failed-vs-success"),
+            api("/api/top-ips"),
+            api("/api/affected-accounts")
+        ]);
+
+        renderIncident(latest);
+        renderIncidentTable(incidents);
+
+        if (distribution.length) {
+            renderSeverityChart(distribution);
+        }
+
+        if (timeline.length) {
+            renderTimelineChart(timeline);
+        }
+
+        renderFailSuccessChart(loginStats);
+
+        if (topIps.length) {
+            renderTopIpsChart(topIps);
+        }
+
+        if (accounts.length) {
+            renderAffectedAccountsChart(accounts);
+        }
+    }
+
+
+    // Analyse the bundled sample log
+    document
+        .getElementById("runSampleBtn")
+        .addEventListener("click", async () => {
+
+            const button =
+                document.getElementById("runSampleBtn");
+
+            button.textContent = "Analyzing...";
+            button.disabled = true;
+
+            try {
+                const response = await fetch(
+                    API + "/api/analyze/sample",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        "Analysis failed: " + response.status
+                    );
+                }
+
+                await refreshDashboard();
+
+            } catch (error) {
+                alert(
+                    "Analysis failed: " + error.message
+                );
+
+            } finally {
+                button.textContent = "Analyze sample log";
+                button.disabled = false;
+            }
+        });
+
+
+    // Analyse an uploaded log file
+    document
+        .getElementById("fileInput")
+        .addEventListener("change", async event => {
+
+            const file = event.target.files[0];
+
+            if (!file) {
+                return;
+            }
+
+            const form = new FormData();
+            form.append("file", file);
+
+            try {
+                const response = await fetch(
+                    API + "/api/analyze/upload",
+                    {
+                        method: "POST",
+                        body: form
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        "Upload failed: " + response.status
+                    );
+                }
+
+                await refreshDashboard();
+
+            } catch (error) {
+                alert(
+                    "Upload/analysis failed: " +
+                    error.message
+                );
+            }
+        });
+
+
+    // Load existing data when the page opens
+    refreshDashboard().catch(error => {
+        console.warn(
+            "Backend not reachable yet:",
+            error.message
+        );
+    });
+</script>
+
+
+</body>
+</html>

@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+# Project files will be inside /app
+WORKDIR /app
+
+# Copy Python dependencies
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ ./backend/
+
+# Copy sample log files
+COPY sample_logs/ ./sample_logs/
+
+# Store SQLite database inside container
+ENV PSYBEAM_DB_PATH=/app/data/psybeam.db
+
+# Create folder for database
+RUN mkdir -p /app/data
+
+# Allow the FastAPI server to use port 8000
+EXPOSE 8000
+
+# Start  API
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
